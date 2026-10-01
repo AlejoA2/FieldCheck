@@ -1,0 +1,57 @@
+# Analizador estático de FieldCheck.
+#
+# `flutter analyze` debe devolver cero incidencias para que un cambio se
+# considere terminado (ver AGENTS.md, sección "Calidad"). Eso exige que el
+# conjunto de reglas sea estable y conocido.
+
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
+    # Generado por flutterfire CLI a partir de las credenciales de Firebase.
+    - "**/firebase_options.dart"
+
+  language:
+    strict-casts: true
+    strict-raw-types: true
+
+  errors:
+    # Los `info` también rompen el build, para que la base se mantenga limpia.
+    unused_import: error
+    unused_local_variable: error
+    dead_code: error
+
+linter:
+  rules:
+    # --- Regla desactivada, con justificación ---
+
+    # El proyecto inyecta dependencias por constructor en campos privados
+    # (p. ej. `SyncService({required SyncQueueStore cola}) : _cola = cola`).
+    # Dart no admite parámetros nombrados que empiecen por "_", así que el
+    # initializing formal que pide esta regla no es una alternativa válida.
+    prefer_initializing_formals: false
+
+    # --- Reglas activadas para subir la calidad ---
+
+    # Exige `const` siempre que sea posible (menos trabajo en runtime).
+    prefer_const_constructors: true
+    prefer_const_constructors_in_immutables: true
+    prefer_const_declarations: true
+    prefer_const_literals_to_create_immutables: true
+
+    # Detecta futuros y streams sin esperar.
+    unawaited_futures: true
+    avoid_void_async: true
+
+    # Detecta estados de carga imposibles.
+    avoid_unnecessary_containers: true
+
+    # Prohíbe `print` en `lib/` (la app usa el logger de `core/utils`).
+    avoid_print: true
