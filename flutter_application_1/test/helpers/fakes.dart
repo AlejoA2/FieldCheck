@@ -7,8 +7,11 @@ library;
 
 import 'dart:async';
 
+import 'package:fieldcheck/data/repositories/visita_repository_impl.dart';
+import 'package:fieldcheck/domain/models/centro_costo.dart';
 import 'package:fieldcheck/domain/models/enums.dart';
 import 'package:fieldcheck/domain/models/evidencia.dart';
+import 'package:fieldcheck/domain/models/novedad.dart';
 import 'package:fieldcheck/domain/models/sync_queue_item.dart';
 import 'package:fieldcheck/domain/models/visita.dart';
 import 'package:fieldcheck/domain/repositories/contracts.dart';
@@ -205,4 +208,149 @@ class FakeVisitaLookup implements VisitaLookup {
   @override
   Future<List<Evidencia>> obtenerEvidencias(String visitaId) async =>
       _evidencias[visitaId] ?? const [];
+}
+
+/// Almacén local en memoria: la caché de campo del supervisor.
+///
+/// Implementa los streams con controladores de difusión que reemiten la lista
+/// completa en cada cambio. Es lo mismo que hace la implementación real sobre
+/// las cajas de Hive, así que un test que pase con este doble ejercita la misma
+/// secuencia de emissions que en producción.
+class FakeAlmacenLocal implements AlmacenLocal {
+  final Map<String, Visita> _visitas = {};
+  final Map<String, List<Evidencia>> _evidencias = {};
+  final Map<String, Novedad> _novedades = {};
+  final Map<String, CentroCosto> _centros = {};
+
+  final StreamController<List<Visita>> _visitasCtrl =
+      StreamController<List<Visita>>.broadcast();
+  final StreamController<List<Evidencia>> _evidenciasCtrl =
+      StreamController<List<Evidencia>>.broadcast();
+
+  /// Historial de escrituras, en orden, para comprobar qué se persistió.
+  final List<String> escrituras = [];
+
+  // --- Visitas ---
+
+  @override
+  Future<void> guardarVisita(Visita visita) async {
+    escrituras.add('visita:${visita.id}:${visita.estado.valor}');
+    _visitas[visita.id] = visita;
+    _emitirVisitas(visita.supervisorId);
+  }
+
+  @override
+  Future<Visita?> visitaPorId(String visitaId) async => _visitas[visitaId];
+
+  @override
+  Future<List<Visita>> visitasDe(String supervisorId) async {
+    final lista = _visitas.values
+        .where((v) => v.supervisorId == supervisorId)
+        .toList()
+      ..sort((a, b) => a.fechaProgramada.compareTo(b.fechaProgramada));
+    return List.unmodifiable(lista);
+  }
+
+  @override
+  Stream<List<Visita>> observarVisitasDe(String supervisorId) => _visitasCtrl.stream;
+
+  @override
+  Future<void> eliminarVisita(String visitaId) async {
+    _visitas.remove(visitaId);
+    _emitirVisitas('');
+  }
+
+  // --- Evidencias ---
+
+  @override
+  Future<void> guardarEvidencia(Evidencia evidencia) async {
+    escrituras.add('evidencia:${evidencia.id}');
+    final lista = _evidencias.putIfAbsent(evidencia.visitaId, () => [])
+      ..removeWhere((e) => e.id == evidencia.id)
+      ..add(evidencia);
+    _evidenciasCtrl.add(List.unmodifiable(lista));
+  }
+
+  @override
+  Future<List<Evidencia>> evidenciasDe(String visitaId) async =>
+      List.unmodifiable(_evidencias[visitaId] ?? const <Evidencia>[]);
+
+  @override
+  Stream<List<Evidencia>> observarEvidenciasDe(String visitaId) =>
+      _evidenciasCtrl.stream;
+
+  @override
+  Future<void> eliminarEvidencia(String evidenciaId) async {
+    for (final lista in _evidencias.values) {
+      lista.removeWhere((e) => e.id == evidenciaId);
+    }
+  }
+
+  // --- Novedades ---
+
+  @override
+  Future<void> guardarNovedad(Novedad novedad) async {
+    escrituras.add('novedad:${novedad.id}:${novedad.prioridad.valor}');
+    _novedades[novedad.id] = novedad;
+  }
+
+  @override
+  Future<Novedad?> novedadPorId(String novedadId) async => _novedades[novedadId];
+
+  @override
+  Future<List<Novedad>> novedadesDe(String visitaId) async => List.unmodifiable(
+    _novedades.values.where((n) => n.visitaId == visitaId).toList(),
+  );
+
+  // --- Centros de costo ---
+
+  @override
+  Future<void> guardarCentroCosto(CentroCosto centro) async => _centros[centro.id] = centro;
+
+  @override
+  Future<CentroCosto?> centroCostoPorId(String id) async => _centros[id];
+
+  @override
+  Future<List<CentroCosto>> centrosActivos() async =>
+      List.unmodifiable(_centros.values.where((c) => c.activo).toList());
+
+  @override
+  Future<void> cerrar() async {
+    await _visitasCtrl.close();
+    await _evidenciasCtrl.close();
+  }
+
+  void _emitirVisitas(String supervisorId) {
+    if (_visitasCtrl.isClosed) return;
+    final lista = supervisorId.isEmpty
+        ? _visitas.values.toList()
+        : _visitas.values.where((v) => v.supervisorId == supervisorId).toList()
+          ..sort((a, b) => a.fechaProgramada.compareTo(b.fechaProgramada));
+    _visitasCtrl.add(List.unmodifiable(lista));
+  }
+}
+
+/// Fuente remota de visitas asignadas, en memoria.
+///
+/// Simula el Firestore donde el coordinador publica las asignaciones. El test
+/// decide qué hay "en el servidor" con [agregar].
+class FakeFuenteVisitasRemotas implements FuenteVisitasRemotas {
+  FakeFuenteVisitasRemotas([List<Visita>? asignadas])
+    : _asignadas = [...?asignadas];
+
+  final List<Visita> _asignadas;
+
+  /// Si se asigna, `visitasAsignadas` lanza este error (para simular sin red).
+  Object? errorAlConsultar;
+
+  /// Añade una visita al "servidor".
+  void agregar(Visita visita) => _asignadas.add(visita);
+
+  @override
+  Future<List<Visita>> visitasAsignadas(String supervisorId) async {
+    if (errorAlConsultar != null) throw errorAlConsultar!;
+    return List.unmodifiable(
+      _asignadas.where((v) => v.supervisorId == supervisorId),
+    );
+  }
 }

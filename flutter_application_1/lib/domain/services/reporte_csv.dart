@@ -30,6 +30,14 @@ class ReporteCsv {
   /// Codec con `;` como separador y BOM UTF-8: el perfil de Excel en español.
   static final Csv _csvExcel = Csv.excel();
 
+  /// Marca de byte order del archivo UTF-8.
+  ///
+  /// El paquete `csv` la antepone a cada bloque que codifica, así que el
+  /// reporte de dos secciones se construye en una sola llamada: concatenar dos
+  /// CSV ya codificados dejaría un BOM intermedio que Excel mostraría como un
+  /// carácter basura al inicio de la segunda sección.
+  static const String _bom = '\uFEFF';
+
   static final DateFormat _fecha = DateFormat('yyyy-MM-dd');
   static final DateFormat _hora = DateFormat('HH:mm');
   static final DateFormat _fechaHora = DateFormat('yyyy-MM-dd HH:mm');
@@ -48,40 +56,23 @@ class ReporteCsv {
   String visitas({
     required List<Visita> visitas,
     Map<String, CentroCosto> centrosPorId = const {},
-  }) {
-    final filas = <List<dynamic>>[
-      ['Reporte de visitas FieldCheck v$version'],
-      ['Generado', _fechaHora.format(DateTime.now())],
-      ['Total de visitas', visitas.length],
-      const [],
-      _encabezadoVisitas,
-      ...visitas.map((v) => _filaVisita(v, centrosPorId[v.centroCostoId])),
-    ];
-    return _codificar(filas);
-  }
+  }) => _codificar(_filasVisitas(visitas, centrosPorId));
 
   /// Genera el CSV de novedades.
   String novedades({
     required List<Novedad> novedades,
     Map<String, CentroCosto> centrosPorId = const {},
     Map<String, String> supervisoresPorId = const {},
-  }) {
-    final filas = <List<dynamic>>[
-      ['Reporte de novedades FieldCheck v$version'],
-      ['Generado', _fechaHora.format(DateTime.now())],
-      ['Total de novedades', novedades.length],
-      const [],
-      _encabezadoNovedades,
-      ...novedades.map((n) => _filaNovedad(n, centrosPorId, supervisoresPorId)),
-    ];
-    return _codificar(filas);
-  }
+  }) => _codificar(_filasNovedades(novedades, centrosPorId, supervisoresPorId));
 
   /// Genera un archivo con dos secciones: visitas y novedades.
   ///
   /// Es el formato que el botón "Exportar" produce: una sola descarga con todo
   /// lo que el filtro seleccionado dejó visible, para que el archivo y lo que
   /// se ve en pantalla sean exactamente el mismo conjunto de datos.
+  ///
+  /// Las dos secciones se codifican en una sola llamada justamente para que el
+  /// BOM UTF-8 aparezca una única vez, al inicio del archivo.
   String completo({
     // Los parámetros llevan prefijo `lista` a propósito: si se llamaran igual
     // que los métodos, dentro de este cuerpo `visitas` resolvería a la lista y
@@ -91,16 +82,40 @@ class ReporteCsv {
     Map<String, CentroCosto> centrosPorId = const {},
     Map<String, String> supervisoresPorId = const {},
   }) {
-    final secciones = <String>[
-      visitas(visitas: listaVisitas, centrosPorId: centrosPorId),
-      novedades(
-        novedades: listaNovedades,
-        centrosPorId: centrosPorId,
-        supervisoresPorId: supervisoresPorId,
-      ),
-    ];
-    return secciones.join('\n\n');
+    return _codificar([
+      ..._filasVisitas(listaVisitas, centrosPorId),
+      // Línea en blanco entre secciones: separa visualmente los dos bloques
+      // sin introducir una fila que Excel interpretaría como dato.
+      const [],
+      const [],
+      ..._filasNovedades(listaNovedades, centrosPorId, supervisoresPorId),
+    ]);
   }
+
+  List<List<dynamic>> _filasVisitas(
+    List<Visita> lista,
+    Map<String, CentroCosto> centrosPorId,
+  ) => <List<dynamic>>[
+    ['Reporte de visitas FieldCheck v$version'],
+    ['Generado', _fechaHora.format(DateTime.now())],
+    ['Total de visitas', lista.length],
+    const [],
+    _encabezadoVisitas,
+    ...lista.map((v) => _filaVisita(v, centrosPorId[v.centroCostoId])),
+  ];
+
+  List<List<dynamic>> _filasNovedades(
+    List<Novedad> lista,
+    Map<String, CentroCosto> centrosPorId,
+    Map<String, String> supervisoresPorId,
+  ) => <List<dynamic>>[
+    ['Reporte de novedades FieldCheck v$version'],
+    ['Generado', _fechaHora.format(DateTime.now())],
+    ['Total de novedades', lista.length],
+    const [],
+    _encabezadoNovedades,
+    ...lista.map((n) => _filaNovedad(n, centrosPorId, supervisoresPorId)),
+  ];
 
   /// Nombre de archivo con marca de tiempo.
   ///
@@ -198,5 +213,16 @@ class ReporteCsv {
   /// El BOM no es decorativo: sin él, Excel en Windows abre los acentos de
   /// "Gestión", "Distancia" y "Titulo" como caracteres rotos. Es el paquete
   /// `csv` el que lo emite, con su perfil `excel`.
-  String _codificar(List<List<dynamic>> filas) => _csvExcel.encode(filas);
+  ///
+  /// La guarda final deja constancia de que el BOM es exactamente uno y está al
+  /// principio: si el formato cambiara, el archivo dejaría de abrirse bien en
+  /// Excel y ese fallo solo se vería al abrirlo a mano.
+  String _codificar(List<List<dynamic>> filas) {
+    final csv = _csvExcel.encode(filas);
+    assert(
+      csv.startsWith(_bom) && _bom.allMatches(csv).length == 1,
+      'El CSV debe tener exactamente un BOM UTF-8, al inicio.',
+    );
+    return csv;
+  }
 }
