@@ -5,7 +5,10 @@ plugins {
 }
 
 android {
-    namespace = "com.example.flutter_application_1"
+    // `namespace` y `applicationId` deben coincidir con el identificador de la
+    // app registrado en la consola de Firebase: es esa coincidencia la que hace
+    // que `google-services.json` se aplique a este build.
+    namespace = "com.fieldcheck.app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -15,12 +18,13 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.flutter_application_1"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        applicationId = "com.fieldcheck.app"
+
+        // firebase_auth 6.x exige minSdk 23; el valor por defecto de Flutter (21)
+        // hace fallar la resolución de dependencias en tiempo de compilación.
+        minSdk = maxOf(flutter.minSdkVersion, 23)
         targetSdk = flutter.targetSdkVersion
+
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
         // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
         // You can force using the value of versionCode by specifying the `-P force-version-code-ignoring-abi=true`
@@ -31,8 +35,8 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
+            // La clave de depuración es suficiente para un prototipo de hackaton.
+            // Sustituir por una clave propia antes de distribuir en Google Play.
             signingConfig = signingConfigs.getByName("debug")
         }
     }

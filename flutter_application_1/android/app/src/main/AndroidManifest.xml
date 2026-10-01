@@ -1,6 +1,38 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Permisos de FieldCheck.
+         - INTERNET: la sincronización con Firestore y Storage. Sin él, el
+           supervisor registra en campo pero nada llega al coordinador.
+         - ACCESS_FINE_LOCATION / ACCESS_COARSE_LOCATION: el check-in y el
+           check-out se validan contra el geofence del centro de costo, que es
+           el valor central del reto. El coarse se pide junto al fine porque
+           Android 12+ permite al usuario conceder solo la precisión aproximada;
+             sin declararlo, esa elección del usuario no sería válida y la app
+             fallaría al pedir la ubicación.
+         - CAMERA: las evidencias se capturan en el momento de la visita. La app
+           no abre la galería a propósito (el enum CapturaFoto solo permite
+           cámara), así que no se declara READ_MEDIA_IMAGES ni READ_EXTERNAL_STORAGE.
+         - WRITE_EXTERNAL_STORAGE con maxSdkVersion="28": solo se necesita para
+           escribir el reporte exportado en Android 9 y anteriores; a partir de
+           Android 10 el package escribe en Descargas por MediaStore sin
+           permiso, y declararlo sin límite activaría el aviso de permisos
+           innecesarios en Play Console. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28"/>
+
+    <!-- La cámara y el GPS se consideran opcionales para que la app pueda
+         instalarse en tablets sin cámara: sin esta línea Google Play filtraría
+         el dispositivo por no tener cámara y la app no llegaría a los
+         supervisores que usan tablet. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.location.gps" android:required="false"/>
+
     <application
-        android:label="flutter_application_1"
+        android:label="FieldCheck"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
