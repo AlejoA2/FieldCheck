@@ -1,0 +1,23 @@
+# Configuración local de herramientas, no del proyecto.
+#
+# `.opencode/` son las definiciones de subagentes del asistente de código y
+# `.vscode/` las preferencias del editor: son de la máquina que se está
+# desarrollando, no del repositorio. Mantenerlas fuera evita que cada
+# contributor pelee con configuraciones ajenas.
+.opencode/
+.vscode/
+
+# Credenciales de Firebase. La app en Android las lee de
+# `flutter_application_1/android/app/google-services.json`, que ya está excluido
+# por el `.gitignore` del paquete Flutter; se repite aquí para que la regla
+# sobreviva aunque ese archivo se mueva.
+**/google-services.json
+**/firebase_options.dart
+**/*.keystore
+**/key.properties
+
+# Artefactos de compilación.
+flutter_application_1/build/
+build/
+*.apk
+*.aab
