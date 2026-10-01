@@ -51,5 +51,33 @@ Dado que la conectividad limitada es el desafío técnico central[cite: 1], se i
 *   **Panel Web (Coordinador):** Dashboard con indicadores en tiempo real de cumplimiento, mapa geográfico de cobertura, alertas de novedades y módulo de reportes[cite: 1].
 *   **App Móvil (Supervisor):** Interfaz fluida, validación de visitas por coordenadas y formulario rápido para registro de actividades cumplidas/no cumplidas y novedades[cite: 1].
 
+## 7. Desviaciones respecto al documento original
+Esta sección registra las decisiones que difieren del planteamiento inicial y el motivo de cada una. `Context.md` sigue siendo la fuente de verdad: el código se ajusta aquí, no al revés.
+
+### 7.1 Base de datos local: Isar → `hive_ce`
+La sección 3 decía "Hive **o** Isar". Se eligió la rama de Hive porque **Isar no es viable con la versión de Dart del proyecto**: la resolución estable disponible (`isar 3.1.0+1`) declara `sdk: >=2.17.0 <3.0.0`, incompatible con Dart 3.13.4 (SDK constraint `^3.13.4`). Forzar Isar exigiría fijar un SDK anterior y perder el resto del toolchain actual.
+
+Se usa `hive_ce` (Community Edition), que mantiene la API de Hive y sigue mantenido activamente. Consecuencias aceptadas:
+*   Sin code generation: los items se guardan como cadenas JSON mediante un almacén propio (`JsonAlmacen`), lo que evita `build_runner`.
+*   Las cajas se indexan por clave `"microsSinceEpoch-id"` para que `watch()` entregue en orden FIFO; un box auxiliar mapea id → clave de almacenamiento.
+
+### 7.2 Exportación de reportes: `csv` + `file_saver` en lugar de `excel`/`pdf`
+La sección 3 mencionaba `pdf` y `excel`. Se optó por **CSV**, porque el requisito real es que el coordinador pueda abrir el reporte en una hoja de cálculo y filtrarlo, no generar un documento con formato fijo:
+*   `csv` con perfil Excel: separador `;` y BOM UTF-8. El separador es punto y coma porque en configuración regional española la coma es el separador decimal y rompería las columnas numéricas.
+*   `file_saver` para la descarga: una sola implementación para navegador (web) y nativo, evitando mantener `dart:io` con tres archivos por plataforma.
+*   El paquete `excel` no se usa: escribir un `.xlsx` exige hablar el formato OOXML (zip + XML) a mano, y el resultado no aporta nada frente a un CSV bien formado para este caso.
+
+### 7.3 `flutter_localizations` como dependencia obligatoria
+`DateFormat(..., 'es')` lanza `LocaleDataException` sin los datos de localización cargados, y `showDateRangePicker` (filtro de fechas del panel) requiere `GlobalMaterialLocalizations`. Por eso el SDK se añade a `dependencies` y `main()` llama a `initializeDateFormatting('es')` antes de construir la app. No es unaucherencia de estilo: sin esto la app falla al arrancar.
+
+### 7.4 Identificadores generados en el cliente
+El documento original no especifica el origen de los ids. Se usa un UUID generado en el cliente como ID de documento en Firestore y como nombre del objeto en Storage. Es lo que hace idempotente el reintento de la cola: reintentar sobrescribe en lugar de duplicar, que es el requisito de "prevención de duplicidad" de la sección 4.
+
+### 7.5 Firebase no incluye credenciales
+No hay `google-services.json` ni `firebase_options.dart` en el repositorio, y no deben añadirse (son secretos). En su lugar, `main.dart` captura `FirebaseNoConfiguradoException` y muestra una pantalla con los pasos de configuración. Consecuencia práctica: el build web, `flutter analyze` y toda la suite de tests funcionan sin credenciales; el APK de Android requiere el archivo, tal como se documenta en `README.md`.
+
+### 7.6 Filtros del panel aplicados en memoria
+El panel del coordinador obtiene un snapshot y aplica `FiltroConsulta` en memoria en lugar de componer consultas con múltiples `where`. Motivo: los índices compuestos de Firestore hay que crearlos a mano en la consola y una app que no arranca sin esa configuración manual es frágil para una demostración. El costo es traer el histórico completo del supervisor; si el volumen lo justificara, el cambio es local a `FirestoreConsultaRepository`.
+
 ---
 **Instrucción para la IA:** Asume el rol de Tech Lead. Genera código estructurado y modular basado en estos lineamientos. Inicia definiendo los modelos de datos y el servicio de sincronización offline (`SyncService`), ya que representan el núcleo técnico para resolver el reto planteado.
