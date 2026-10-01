@@ -35,6 +35,7 @@ import '../../core/utils/clock.dart';
 import '../../domain/models/enums.dart';
 import '../../domain/models/sync_queue_item.dart';
 import '../../domain/repositories/contracts.dart';
+import '../../domain/services/payload_evidencias.dart';
 
 /// Estado observable de la sincronización, para alimentar la UI.
 class EstadoSync {
@@ -127,6 +128,7 @@ class SyncService {
     required ConnectivityService conectividad,
     BackoffPolicy backoff = const BackoffPolicy(),
     Clock clock = const SystemClock(),
+    PayloadEvidencias payloads = const PayloadEvidencias(),
     double Function()? random,
   }) : _cola = cola,
        _gateway = gateway,
@@ -134,6 +136,7 @@ class SyncService {
        _conectividad = conectividad,
        _backoff = backoff,
        _clock = clock,
+       _payloads = payloads,
        _random = random ?? _randomPorDefecto;
 
   final SyncQueueStore _cola;
@@ -142,6 +145,10 @@ class SyncService {
   final ConnectivityService _conectividad;
   final BackoffPolicy _backoff;
   final Clock _clock;
+
+  /// Sustituye rutas locales por URLs dentro del payload. Inyectado para poder
+  /// probar la resolución de evidencias sin Storage.
+  final PayloadEvidencias _payloads;
 
   /// Fuente de aleatoriedad para el jitter del backoff. Inyectable para tests.
   final double Function() _random;
@@ -301,16 +308,33 @@ class SyncService {
   ///
   /// Marca el item como [SyncStatus.sincronizando] antes de tocar la red: si la
   /// app muere aquí, el próximo arranque lo encuentra pendiente otra vez.
-  Future<bool> _procesar(SyncQueueItem item) async {
+  ///
+  /// Para un `upsert` con archivos, el orden es deliberado:
+  ///
+  /// ```text
+  /// subir binarios -> obtener URL -> construir documento -> escribir
+  /// ```
+  ///
+  /// Subir después de escribir dejaría documentos que apuntan a fotos
+  /// inexistentes. Y borrar el archivo local solo al final es lo que evita
+  /// perder la foto si la escritura falla a mitad de camino.
+  Future<bool> _procesar(SyncQueueItem original) async {
     final ahora = _clock.nowUtc();
 
-    await _cola.actualizar(
-      item.copyWith(estado: SyncStatus.sincronizando, ultimoIntentoAt: ahora),
+    // `item` se va reemplazando a medida que se registra progreso (por ejemplo,
+    // URLs ya subidas). Importa para que, si algo falla más adelante, el
+    // registro de fallo no pise ese progreso con una versión antigua del item.
+    var item = original.copyWith(
+      estado: SyncStatus.sincronizando,
+      ultimoIntentoAt: ahora,
     );
+
+    await _cola.actualizar(item);
 
     try {
       switch (item.operacion) {
         case SyncOperacion.upsert:
+          item = await _prepararPayload(item);
           await _gateway.upsert(item.entidad, item.id, item.payload);
         case SyncOperacion.eliminar:
           await _gateway.eliminar(item.entidad, item.id);
@@ -330,6 +354,49 @@ class SyncService {
       return false;
     }
   }
+
+  /// Sube los binarios pendientes y devuelve el item con el payload resuelto.
+  ///
+  /// El mapa de URLs se persiste **antes** de escribir en el servidor. Ese orden
+  /// importa: si la escritura falla justo después de subir las fotos, el
+  /// reintento debe poder reutilizar esas URLs en lugar de volver a subir los
+  /// mismos archivos. En una conexión de campo, donde cada reintento cuesta
+  /// datos, esa es la diferencia entre una recuperación barata y una costosa.
+  Future<SyncQueueItem> _prepararPayload(SyncQueueItem item) async {
+    if (!item.tieneArchivos) return item;
+
+    final resueltas = <String, String>{...item.urlsSubidas};
+    var huboSubidasNuevas = false;
+
+    for (final ruta in item.rutasArchivosLocales) {
+      if (resueltas.containsKey(ruta)) continue;
+      resueltas[ruta] = await _evidencia.subir(
+        rutaLocal: ruta,
+        nombreDestino: _nombreDestino(item, ruta),
+      );
+      huboSubidasNuevas = true;
+    }
+
+    if (!huboSubidasNuevas) return item;
+
+    // Se persiste el avance antes de tocar el servidor, para que un fallo
+    // posterior no obligue al reintento a volver a subir los mismos archivos.
+    final actualizado = item.copyWith(
+      urlsSubidas: resueltas,
+      payload: _payloads.resolver(item.payload, resueltas),
+    );
+    await _cola.actualizar(actualizado);
+    return actualizado;
+  }
+
+  /// Ruta del archivo en Storage. Estable entre reintentos, que es lo que hace
+  /// la subida idempotente.
+  String _nombreDestino(SyncQueueItem item, String rutaLocal) =>
+      PayloadEvidencias.nombreDestino(
+        coleccion: item.entidad.valor,
+        entidadId: item.entidadId,
+        rutaLocal: rutaLocal,
+      );
 
   /// Aplica la política de reintentos ante un fallo.
   Future<void> _registrarFallo(SyncQueueItem item, Object error) async {

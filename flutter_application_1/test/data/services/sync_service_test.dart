@@ -25,11 +25,12 @@ void main() {
     DateTime? proximoIntentoAt,
     SyncStatus estado = SyncStatus.pendiente,
     List<String> rutas = const [],
+    Map<String, dynamic> payload = const {'id': 'ent-q-1'},
   }) => SyncQueueItem(
     id: id,
     entidad: entidad,
     entidadId: 'ent-$id',
-    payload: {'id': 'ent-$id'},
+    payload: payload,
     creadoAt: creadoAt ?? inicio,
     operacion: operacion,
     intentos: intentos,
@@ -311,6 +312,39 @@ void main() {
   });
 
   group('Evidencias', () {
+    test('sube el archivo antes de escribir el documento', () async {
+      await cola.encolar(item(rutas: const ['/tmp/foto.jpg']));
+
+      await servicio.sincronizarAhora();
+
+      expect(evidencia.subidas, hasLength(1));
+      expect(evidencia.subidas.first, contains('ent-q-1'));
+      expect(evidencia.subidas.first, endsWith('foto.jpg'));
+    });
+
+    test('el documento enviado lleva la URL, no la ruta local', () async {
+      await cola.encolar(
+        item(
+          rutas: const ['/tmp/foto.jpg'],
+          payload: {
+            'id': 'ent-q-1',
+            'evidencias': [
+              {'id': 'e-1', 'rutaLocal': '/tmp/foto.jpg'},
+            ],
+          },
+        ),
+      );
+
+      await servicio.sincronizarAhora();
+
+      final enviado = gateway.documentos['visitas']!['q-1']!;
+      final foto = Map<String, dynamic>.from(
+        (enviado['evidencias'] as List<dynamic>).first as Map,
+      );
+      expect(foto['urlRemota'], startsWith('https://fake.storage/'));
+      expect(foto.containsKey('rutaLocal'), isFalse);
+    });
+
     test('limpia los archivos locales solo tras confirmar la subida', () async {
       await cola.encolar(item(rutas: const ['/tmp/foto.jpg']));
 
@@ -327,6 +361,28 @@ void main() {
 
       expect(evidencia.rutasLocalesLimpias, isEmpty);
       expect(await cola.contarPendientes(), 1);
+    });
+
+    test('conserva la URL ya subida y no vuelve a subir el archivo', () async {
+      await cola.encolar(item(rutas: const ['/tmp/foto.jpg']));
+      gateway.errorAlEscribir = StateError('sin red');
+      await servicio.sincronizarAhora();
+
+      // Primer reintento: el archivo sí se sube (aún no se había subido).
+      evidencia.subidas.clear();
+      reloj.avanzar(const Duration(seconds: 31));
+      gateway.errorAlEscribir = StateError('sin red');
+      await servicio.sincronizarAhora();
+
+      // La URL quedó registrada en el item, así que el segundo reintento no
+      // vuelve a gastar ancho de banda subiendo la misma foto.
+      evidencia.subidas.clear();
+      reloj.avanzar(const Duration(minutes: 2));
+      gateway.errorAlEscribir = null;
+      await servicio.sincronizarAhora();
+
+      expect(evidencia.subidas, isEmpty);
+      expect(await cola.contarPendientes(), 0);
     });
   });
 

@@ -33,6 +33,7 @@ class SyncQueueItem {
     this.proximoIntentoAt,
     this.ultimoError,
     this.rutasArchivosLocales = const [],
+    this.urlsSubidas = const {},
   });
 
   /// Clave de idempotencia. Se genera en el cliente y viaja como ID de documento.
@@ -72,6 +73,14 @@ class SyncQueueItem {
   /// `SyncService` sepa que debe subir binaries antes de confirmar el item.
   final List<String> rutasArchivosLocales;
 
+  /// Archivos ya subidos, indexados por su ruta local.
+  ///
+  /// El `SyncService` lo rellena a medida que sube cada binario y lo persiste en
+  /// el item. Sin este mapa, un reintento tras un fallo de red volvería a
+  /// subir fotos que ya estaban en Storage: desperdicio de datos del usuario en
+  /// una conexión de campo, que es exactamente el recurso escaso del escenario.
+  final Map<String, String> urlsSubidas;
+
   bool get requiereSync => estado.requiereSync;
 
   /// `true` si este item tiene archivos pendientes de subir.
@@ -97,6 +106,7 @@ class SyncQueueItem {
     bool limpiarError = false,
     Map<String, dynamic>? payload,
     List<String>? rutasArchivosLocales,
+    Map<String, String>? urlsSubidas,
     SyncOperacion? operacion,
   }) {
     return SyncQueueItem(
@@ -112,6 +122,7 @@ class SyncQueueItem {
       proximoIntentoAt: proximoIntentoAt ?? this.proximoIntentoAt,
       ultimoError: limpiarError ? null : (ultimoError ?? this.ultimoError),
       rutasArchivosLocales: rutasArchivosLocales ?? this.rutasArchivosLocales,
+      urlsSubidas: urlsSubidas ?? this.urlsSubidas,
     );
   }
 
@@ -131,6 +142,7 @@ class SyncQueueItem {
     'proximoIntentoAt': proximoIntentoAt?.toIso8601String(),
     'ultimoError': ultimoError,
     'rutasArchivosLocales': rutasArchivosLocales,
+    'urlsSubidas': urlsSubidas,
   };
 
   factory SyncQueueItem.fromMap(Map<String, dynamic> map) => SyncQueueItem(
@@ -151,7 +163,31 @@ class SyncQueueItem {
     rutasArchivosLocales: (map['rutasArchivosLocales'] as List<dynamic>? ?? const [])
         .map((e) => e.toString())
         .toList(),
+    urlsSubidas: _urlsDesde(map['urlsSubidas']),
   );
+
+  /// Reconstruye el mapa de URLs ya subidas, tolerando formatos previos donde
+  /// venía como lista de pares.
+  static Map<String, String> _urlsDesde(Object? valor) {
+    if (valor is Map) {
+      return <String, String>{
+        for (final entrada in valor.entries)
+          entrada.key.toString(): entrada.value.toString(),
+      };
+    }
+    if (valor is List) {
+      // Formato legado: ["ruta|url", ...].
+      final resultado = <String, String>{};
+      for (final elemento in valor) {
+        final partes = elemento.toString().split('|');
+        if (partes.length == 2) {
+          resultado[partes[0]] = partes[1];
+        }
+      }
+      return resultado;
+    }
+    return const {};
+  }
 
   @override
   String toString() =>

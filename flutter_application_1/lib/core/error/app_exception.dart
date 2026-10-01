@@ -1,3 +1,11 @@
+// `use_super_parameters` se desactiva en este archivo por una limitación real
+// del lenguaje: Dart no permite mezclar un superparámetro posicional opcional
+// (`[super.message = '...']`) con superparámetros nombrados (`{super.cause}`) en
+// el mismo constructor. Se comprobó que la forma mixta no compila. Los
+// mensajes por defecto son la parte del API más usada (`throw const
+// ValidationException('...')`), así que se conservan y se renuncia a la regla.
+// ignore_for_file: use_super_parameters
+
 /// Jerarquía de errores de la aplicación.
 ///
 /// El dominio lanza estas excepciones; las capas superiores (ViewModels,
@@ -21,6 +29,8 @@ sealed class AppException implements Exception {
 
   /// Causa original, útil solo para logging.
   final Object? cause;
+
+  /// Traza original, útil solo para logging.
   final StackTrace? stackTrace;
 
   @override
@@ -30,43 +40,59 @@ sealed class AppException implements Exception {
 /// La operación requiere conexión y no hay red disponible.
 final class OfflineException extends AppException {
   const OfflineException([
-    super.message = 'Sin conexión a Internet. Los datos se guardarán localmente.',
-  ]);
+    String message = 'Sin conexión a Internet. Los datos se guardarán localmente.',
+    Object? cause,
+    StackTrace? stackTrace,
+  ]) : super(message, cause: cause, stackTrace: stackTrace);
 }
 
 /// Fallas de autenticación (credenciales inválidas, sesión expirada, etc.).
 final class AuthException extends AppException {
-  const AuthException(super.message);
+  const AuthException(String message, {Object? cause, StackTrace? stackTrace})
+    : super(message, cause: cause, stackTrace: stackTrace);
 }
 
 /// El usuario no tiene permiso para la operación solicitada.
 final class PermissionException extends AppException {
   const PermissionException([
-    super.message = 'No tienes permisos para realizar esta acción.',
-  ]);
+    String message = 'No tienes permisos para realizar esta acción.',
+    Object? cause,
+    StackTrace? stackTrace,
+  ]) : super(message, cause: cause, stackTrace: stackTrace);
 }
 
 /// No se encontró el recurso solicitado.
 final class NotFoundException extends AppException {
-  const NotFoundException([super.message = 'El recurso no existe.']);
+  const NotFoundException([
+    String message = 'El recurso no existe.',
+    Object? cause,
+    StackTrace? stackTrace,
+  ]) : super(message, cause: cause, stackTrace: stackTrace);
 }
 
 /// Falló una validación de negocio (por ejemplo, geofence: check-in fuera del radio).
 final class ValidationException extends AppException {
-  const ValidationException(super.message);
+  const ValidationException(String message, {Object? cause, StackTrace? stackTrace})
+    : super(message, cause: cause, stackTrace: stackTrace);
 }
 
 /// Falla en la capa remota (Firestore, Storage, Auth).
 final class RemoteException extends AppException {
-  const RemoteException(super.message);
+  const RemoteException(String message, {Object? cause, StackTrace? stackTrace})
+    : super(message, cause: cause, stackTrace: stackTrace);
 }
 
 /// Falla al operar con el almacenamiento local (Hive, sistema de archivos).
 final class LocalStorageException extends AppException {
-  const LocalStorageException(super.message);
+  const LocalStorageException(String message, {Object? cause, StackTrace? stackTrace})
+    : super(message, cause: cause, stackTrace: stackTrace);
 }
 
 /// Falla al adquirir permisos del dispositivo (cámara, ubicación).
 final class DevicePermissionException extends AppException {
-  const DevicePermissionException(super.message);
+  const DevicePermissionException(
+    String message, {
+    Object? cause,
+    StackTrace? stackTrace,
+  }) : super(message, cause: cause, stackTrace: stackTrace);
 }
