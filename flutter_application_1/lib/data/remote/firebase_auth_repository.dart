@@ -50,19 +50,16 @@ class FirebaseAuthRepository implements AuthRepository {
 
   /// Último error de resolución de perfil, para que el login pueda explicar por
   /// qué volvió a la pantalla inicial.
-  String? _ultimoError;
+  String? _motivoDeCierre;
 
   @override
   AppUser? get usuarioActual => _actual;
 
-  /// Mensaje del último fallo al resolver el perfil, o `null` si no hubo.
-  ///
-  /// La UI debe consumirlo antes de limpiar la sesión: si se pierde, el
-  /// supervisor ve volver al login sin explicación.
-  String? tomarUltimoError() {
-    final error = _ultimoError;
-    _ultimoError = null;
-    return error;
+  @override
+  String? tomarMotivoDeCierre() {
+    final motivo = _motivoDeCierre;
+    _motivoDeCierre = null;
+    return motivo;
   }
 
   @override
@@ -88,7 +85,7 @@ class FirebaseAuthRepository implements AuthRepository {
       }
 
       _actual = usuario;
-      if (usuario == null && error != null) _ultimoError = error;
+      if (usuario == null && error != null) _motivoDeCierre = error;
       yield usuario;
     }
   }

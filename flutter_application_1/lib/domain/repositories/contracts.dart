@@ -130,6 +130,15 @@ abstract class AuthRepository {
   /// evidencia de campo y deben sobrevivir al cierre para poder sincronizar.
   Future<void> cerrarSesion();
 
+  /// Motivo por el que la última resolución de perfil falló, o `null`.
+  ///
+  /// Se consume una sola vez (queda en `null` después de leerlo). Existe para
+  /// este caso concreto: el usuario inicia sesión correctamente pero su cuenta
+  /// está desactivada o su perfil no se pudo leer, así que `observarSesion`
+  /// emite `null` y la UI lo devolvería al login sin explicación. Con este
+  /// método el login puede mostrar por qué.
+  String? tomarMotivoDeCierre();
+
   /// Guarda cambios del perfil del usuario autenticado.
   Future<void> actualizarPerfil(AppUser usuario);
 }
